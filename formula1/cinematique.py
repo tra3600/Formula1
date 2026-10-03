@@ -79,11 +79,9 @@ def temps_droite(d: float, v1: float, v2: float, p: Parametres = PAR) -> float:
     return (v3 - v1) / a + (v3 - v2) / f
 
 
-def temps_tour(c, v0: float, vf: float, p: Parametres = PAR,
-               arc_virage: bool = False) -> float:
-    """Temps minimal d'un tour, parti à la vitesse v0 et fini à une vitesse <= vf.
-    Si arc_virage, chaque virage est un quart de cercle parcouru à vitesse
-    constante ; sinon sa durée est négligée."""
+def _simuler_tour(c, v0: float, vf: float, p: Parametres, arc_virage: bool):
+    """(durée, vitesse finale) d'un tour glouton : on accélère dès qu'on le peut,
+    sans dépasser les vitesses d'entrée maximales de chaque segment."""
     b = _bornes(c, vf, p)
     if v0 > b[0] + EPS:
         raise ValueError("vitesse de départ v0 trop élevée pour ce circuit")
@@ -100,31 +98,42 @@ def temps_tour(c, v0: float, vf: float, p: Parametres = PAR,
         v_sortie = min(b[i + 1], atteignable, p.vmax)
         total += temps_droite(x, v, v_sortie, p)
         v = v_sortie
-    return total
+    return total, v
+
+
+def temps_tour(c, v0: float, vf: float, p: Parametres = PAR,
+               arc_virage: bool = False) -> float:
+    """Temps minimal d'un tour, parti à la vitesse v0 et fini à une vitesse <= vf.
+    Si arc_virage, chaque virage est un quart de cercle parcouru à vitesse
+    constante ; sinon sa durée est négligée."""
+    return _simuler_tour(c, v0, vf, p, arc_virage)[0]
 
 
 def vitesse_de_ligne(c, p: Parametres = PAR) -> float:
-    """Vitesse maximale s à laquelle on peut franchir la ligne en régime
-    permanent (point fixe s = vitesses_entree_max(c, s)[0])."""
+    """Vitesse maximale s à laquelle on peut franchir la ligne à chaque tour en
+    régime permanent : s doit pouvoir être freinée jusqu'au bout du tour ET être
+    effectivement retrouvée à la fin du tour précédent (une ligne juste après un
+    virage lent ne se franchit pas à vmax)."""
     s = p.vmax
-    for _ in range(1000):
-        nouveau = _bornes(c, s, p)[0]
+    for _ in range(5000):
+        nouveau = min(s, _bornes(c, s, p)[0])
         if nouveau >= s - EPS:
-            return s
+            fin = _simuler_tour(c, s, s, p, False)[1]
+            nouveau = min(s, fin)
+            if nouveau >= s - EPS:
+                return s
         s = nouveau
     return s
 
 
 def temps_course(c, n: int, p: Parametres = PAR, arc_virage: bool = False) -> float:
-    """Temps minimal pour n tours, départ arrêté, vitesse finale libre."""
+    """Temps minimal pour n tours, départ arrêté, vitesse finale libre.
+
+    Optimum exact : le circuit est répété n fois bout à bout, la voiture accélère
+    dès qu'elle le peut et freine au dernier moment (ce qui inclut le régime
+    établi des tours intermédiaires)."""
     if n < 1:
         raise ValueError("n doit être >= 1")
     if not c:
         raise ValueError("circuit vide")
-    if n == 1:
-        return temps_tour(c, 0.0, p.vmax, p, arc_virage)
-    s = vitesse_de_ligne(c, p)
-    total = temps_tour(c, 0.0, s, p, arc_virage)
-    if n > 2:
-        total += (n - 2) * temps_tour(c, s, s, p, arc_virage)
-    return total + temps_tour(c, s, p.vmax, p, arc_virage)
+    return temps_tour(list(c) * n, 0.0, p.vmax, p, arc_virage)
